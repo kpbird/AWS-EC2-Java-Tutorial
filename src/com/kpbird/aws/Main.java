@@ -12,18 +12,28 @@ import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.ec2.AmazonEC2Client;
 import com.amazonaws.services.ec2.model.AuthorizeSecurityGroupIngressRequest;
+import com.amazonaws.services.ec2.model.CreateImageRequest;
+import com.amazonaws.services.ec2.model.CreateImageResult;
 import com.amazonaws.services.ec2.model.CreateKeyPairRequest;
 import com.amazonaws.services.ec2.model.CreateKeyPairResult;
 import com.amazonaws.services.ec2.model.CreateSecurityGroupRequest;
 import com.amazonaws.services.ec2.model.CreateSecurityGroupResult;
 import com.amazonaws.services.ec2.model.CreateTagsRequest;
+import com.amazonaws.services.ec2.model.DescribeImagesRequest;
+import com.amazonaws.services.ec2.model.DescribeImagesResult;
 import com.amazonaws.services.ec2.model.DescribeInstancesResult;
+import com.amazonaws.services.ec2.model.DescribeSpotInstanceRequestsRequest;
+import com.amazonaws.services.ec2.model.DescribeSpotInstanceRequestsResult;
 import com.amazonaws.services.ec2.model.Instance;
 import com.amazonaws.services.ec2.model.IpPermission;
 import com.amazonaws.services.ec2.model.KeyPair;
+import com.amazonaws.services.ec2.model.LaunchSpecification;
+import com.amazonaws.services.ec2.model.RequestSpotInstancesRequest;
+import com.amazonaws.services.ec2.model.RequestSpotInstancesResult;
 import com.amazonaws.services.ec2.model.Reservation;
 import com.amazonaws.services.ec2.model.RunInstancesRequest;
 import com.amazonaws.services.ec2.model.RunInstancesResult;
+import com.amazonaws.services.ec2.model.SpotInstanceRequest;
 import com.amazonaws.services.ec2.model.Tag;
 
 
@@ -69,7 +79,8 @@ public class Main {
 	private String instanceType ="t1.micro";
 	private String instanceName = "kpbirdt1micro";
 	
-	
+	// EC2 Spot Instance
+	private String spotPrice = "0.080";
 	
 	public static void main(String[] args) {
 		Main m = new Main();
@@ -220,7 +231,105 @@ public class Main {
 	}
 	
 	private void createEC2SpotInstance(){
-		
+		try {
+			/// Creating Spot Instance ////
+			
+			// Initializes a Spot Instance Request
+			RequestSpotInstancesRequest requestRequest = new RequestSpotInstancesRequest();
+			// Request 1 x t1.micro instance with a bid price of $0.03.
+			requestRequest.setSpotPrice(spotPrice);
+			requestRequest.setInstanceCount(Integer.valueOf(1));
+			LaunchSpecification launchSpecification = new LaunchSpecification();
+			launchSpecification.setImageId(imageId);
+			launchSpecification.setInstanceType(instanceType);
+			launchSpecification.setMonitoringEnabled(true);
+			
+			// Add the security group to the request.
+			ArrayList<String> securityGroups = new ArrayList<String>();
+			securityGroups.add(groupName);
+			launchSpecification.setSecurityGroups(securityGroups);
+			
+			launchSpecification.setKeyName(keyName);
+
+			// Add the launch specifications to the request.
+			requestRequest.setLaunchSpecification(launchSpecification);
+
+			// Call the RequestSpotInstance API.
+			RequestSpotInstancesResult requestResult = ec2client.requestSpotInstances(requestRequest);
+			
+			List<SpotInstanceRequest> requestResponses = requestResult.getSpotInstanceRequests();
+
+			// Setup an arraylist to collect all of the request ids we want to
+			// watch hit the running state.
+			ArrayList<String> spotInstanceRequestIds = new ArrayList<String>();
+
+			// Add all of the request ids to the hashset, so we can determine when they hit the
+			// active state.
+			for (SpotInstanceRequest requestResponse : requestResponses) {
+			    System.out.println("Created Spot Request: "+requestResponse.getSpotInstanceRequestId());
+			    spotInstanceRequestIds.add(requestResponse.getSpotInstanceRequestId());
+			    log.Info(requestResponse.getInstanceId() + "\t" + requestResponse.getState());
+			}
+			
+			String instanceId=null;
+			boolean isWaiting=true;
+			while(isWaiting){
+				log.Info("*** Waiting for Spot Instance Request ***");
+				Thread.sleep(5000);
+				 DescribeSpotInstanceRequestsRequest describeRequest = new DescribeSpotInstanceRequestsRequest();
+				 describeRequest.setSpotInstanceRequestIds(spotInstanceRequestIds);
+				 
+				 DescribeSpotInstanceRequestsResult describeResult = ec2client.describeSpotInstanceRequests(describeRequest);
+			     List<SpotInstanceRequest> describeResponses = describeResult.getSpotInstanceRequests();
+			     for (SpotInstanceRequest describeResponse : describeResponses) {
+			    	 log.Info(describeResponse.getInstanceId() + "\t" + describeResponse.getState() + "\t" + describeResponse.getSpotInstanceRequestId() + "\t" + describeResponse.getStatus().getCode() + "\t" + describeResponse.getStatus().getMessage());
+			        if (describeResponse.getState().equals("active")) {
+			            isWaiting = false;
+			            instanceId = describeResponse.getInstanceId();
+			            break;
+			        }
+			     }
+				
+			}
+			isWaiting = true;
+			while (isWaiting) {
+				log.Info("*** Waiting for Instance Running ***");
+				Thread.sleep(1000);
+				DescribeInstancesResult r = ec2client.describeInstances();
+				Iterator<Reservation> ir= r.getReservations().iterator();
+				while(ir.hasNext()){
+					Reservation rr = ir.next();
+					List<Instance> instances = rr.getInstances();
+					for(Instance ii : instances){
+						log.Info(ii.getImageId() + "\t" + ii.getInstanceId()+ "\t" + ii.getState().getName() + "\t"+ ii.getPrivateDnsName());
+						if (ii.getState().getName().equals("running") && ii.getInstanceId().equals(instanceId) ) {
+							log.Info(ii.getPublicDnsName());
+							String publicDNS = ii.getPublicDnsName();
+							log.Info("Public DNS :" + publicDNS);
+							isWaiting=false;
+						}
+					}
+				}
+			}
+			
+			
+			
+			/// Creating Tag for New Instance ////
+			log.Info("Creating Tags for New Instance");
+			CreateTagsRequest crt = new CreateTagsRequest();
+			ArrayList<Tag> arrTag = new ArrayList<Tag>();
+			arrTag.add(new Tag().withKey("Name").withValue(instanceName));
+			crt.setTags(arrTag);
+			
+			ArrayList<String> arrInstances = new ArrayList<String>();
+			arrInstances.add(instanceId);
+			crt.setResources(arrInstances);
+			ec2client.createTags(crt);
+			
+			
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 	}
 	
 	private void writePemFile(String privateKey,String pemFilePath,String keyname){
