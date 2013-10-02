@@ -12,15 +12,11 @@ import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.ec2.AmazonEC2Client;
 import com.amazonaws.services.ec2.model.AuthorizeSecurityGroupIngressRequest;
-import com.amazonaws.services.ec2.model.CreateImageRequest;
-import com.amazonaws.services.ec2.model.CreateImageResult;
 import com.amazonaws.services.ec2.model.CreateKeyPairRequest;
 import com.amazonaws.services.ec2.model.CreateKeyPairResult;
 import com.amazonaws.services.ec2.model.CreateSecurityGroupRequest;
 import com.amazonaws.services.ec2.model.CreateSecurityGroupResult;
 import com.amazonaws.services.ec2.model.CreateTagsRequest;
-import com.amazonaws.services.ec2.model.DescribeImagesRequest;
-import com.amazonaws.services.ec2.model.DescribeImagesResult;
 import com.amazonaws.services.ec2.model.DescribeInstancesResult;
 import com.amazonaws.services.ec2.model.DescribeSpotInstanceRequestsRequest;
 import com.amazonaws.services.ec2.model.DescribeSpotInstanceRequestsResult;
@@ -35,6 +31,17 @@ import com.amazonaws.services.ec2.model.RunInstancesRequest;
 import com.amazonaws.services.ec2.model.RunInstancesResult;
 import com.amazonaws.services.ec2.model.SpotInstanceRequest;
 import com.amazonaws.services.ec2.model.Tag;
+import com.amazonaws.services.rds.AmazonRDSClient;
+import com.amazonaws.services.rds.model.AuthorizeDBSecurityGroupIngressRequest;
+import com.amazonaws.services.rds.model.CreateDBInstanceRequest;
+import com.amazonaws.services.rds.model.CreateDBParameterGroupRequest;
+import com.amazonaws.services.rds.model.CreateDBSecurityGroupRequest;
+import com.amazonaws.services.rds.model.DBInstance;
+import com.amazonaws.services.rds.model.DBSecurityGroup;
+import com.amazonaws.services.rds.model.DescribeDBInstancesRequest;
+import com.amazonaws.services.rds.model.DescribeDBInstancesResult;
+import com.amazonaws.services.rds.model.ModifyDBParameterGroupRequest;
+import com.amazonaws.services.rds.model.Parameter;
 
 
 
@@ -48,6 +55,7 @@ public class Main {
 	private String endPoint ;
 	private Region region ;
 	private AmazonEC2Client ec2client ;
+	private AmazonRDSClient rdsclient;	
 	
 	// EC2 Security Group  Variables
 	private String groupName = "kpbirdec2securitygroup";
@@ -82,6 +90,41 @@ public class Main {
 	// EC2 Spot Instance
 	private String spotPrice = "0.080";
 	
+	//RDS - MySql instance
+	private String rdsengine = "MySQL";
+	private String EngineVersion = "5.5.31";
+	private String LicenseModel = "general-public-license";
+	private boolean AutoMinorVersionUpgrade = true;
+	private String DBInstanceClass ="db.t1.micro";
+	private boolean MultiAZ =false;
+	private int AllocatedStorage = 25;
+	
+	private String DBInstanceIdentifier = "kpbirdrdsmysql";
+	private String MasterUsername = "kpbird_user";
+	private String MasterUserPassword = "kpbird_pass";
+	private String DBName = "kpbirddb";
+	private int Port = 3306;
+	private int BackupRetentionPeriod =1;
+	private boolean PubliclyAccessible = true;
+	
+	// db security group parameters
+	private String DBSecurityGroupName = "kpbirddbsecuritygroup";
+	private String DBSsecurityGroupDescription = "this is db security group description";
+	private String OwnerId = "YOUR OWNER ID";
+	
+	// db parameter group 
+	private String DBParameterGroupName = "kpbirdrdsparametergroup";
+	private String DBParameterGroupDescription = "this is db parameter group description";
+	private String DBParameterGroupFamily = "mysql5.5";
+	
+	private String DBParameterName1 = "max_connections";
+	private String DBParameterValue1 = "200";
+	private String DBParameterApplyMethod1 = "immediate";
+	
+	private String DBParameterName2 = "max_allowed_packet";
+	private String DBParameterValue2 = "33552384";
+	private String DBParameterApplyMethod2 = "immediate";	
+	
 	public static void main(String[] args) {
 		Main m = new Main();
 		m.init();
@@ -89,6 +132,9 @@ public class Main {
 		m.createKeyPair();
 		m.createEC2OnDemandInstance();
 		m.createEC2SpotInstance();
+		m.createRDSSecurityGroup();
+		m.createRDS();
+		
 	}
 	
 	private void init(){
@@ -100,6 +146,11 @@ public class Main {
 		ec2client = new AmazonEC2Client(credentials);
 		ec2client.setEndpoint(endPoint);
 		ec2client.setRegion(region);
+		// RDSClient object
+		rdsclient = new AmazonRDSClient(credentials);
+		rdsclient.setRegion(region);
+		rdsclient.setEndpoint(endPoint);
+		
 		
 	}
 	
@@ -341,5 +392,109 @@ public class Main {
 			e.printStackTrace();
 		}
 	}
+	public void createRDSSecurityGroup(){
+		try {
+			
+			log.Info("About to Launch RDS");
+			
+			CreateDBSecurityGroupRequest d = new CreateDBSecurityGroupRequest();
+			d.setDBSecurityGroupName(DBSecurityGroupName);
+			d.setDBSecurityGroupDescription(DBSsecurityGroupDescription);
+			rdsclient.createDBSecurityGroup(d);
+			
+			
+			AuthorizeDBSecurityGroupIngressRequest auth = new AuthorizeDBSecurityGroupIngressRequest();
+			auth.setDBSecurityGroupName(DBSecurityGroupName);
+			auth.setEC2SecurityGroupName(groupName);
+			auth.setEC2SecurityGroupOwnerId(OwnerId);
+			
+			
+			DBSecurityGroup dbsecuritygroup= rdsclient.authorizeDBSecurityGroupIngress(auth);
+			
+		} catch (Exception e) {
+			e.printStackTrace();
+			System.exit(0);
+		}
+	}
+	
+	public void createRDS(){
+		try {
+			log.Info("About to Launch RDS");
+			
+			
+			log.Info("Createing DB Parameger Group");
+			
+			CreateDBParameterGroupRequest cdpgr = new CreateDBParameterGroupRequest();
+			cdpgr.setDBParameterGroupName(DBParameterGroupName);
+			cdpgr.setDescription(DBParameterGroupDescription);
+			cdpgr.setDBParameterGroupFamily(DBParameterGroupFamily);
+			rdsclient.createDBParameterGroup(cdpgr);
+			
+			
+			Collection<Parameter> parameters = new ArrayList<Parameter>();
+			parameters.add( new Parameter()
+            .withParameterName(DBParameterName1)
+            .withParameterValue(DBParameterValue1)
+            .withApplyMethod(DBParameterApplyMethod1));
+			parameters.add( new Parameter()
+            .withParameterName(DBParameterName2)
+            .withParameterValue(DBParameterValue2)
+            .withApplyMethod(DBParameterApplyMethod2));
+			
+			
+			rdsclient.modifyDBParameterGroup( new ModifyDBParameterGroupRequest().withDBParameterGroupName(DBParameterGroupName).withParameters(parameters));
+			
+			
+			log.Info("Create DB Instance Request");
+			/// create configuration of instance
+			CreateDBInstanceRequest cdbir = new CreateDBInstanceRequest();
+			cdbir.setEngine(rdsengine);
+			cdbir.setEngineVersion(EngineVersion);
+			cdbir.setLicenseModel(LicenseModel);
+			cdbir.setAutoMinorVersionUpgrade(AutoMinorVersionUpgrade);
+			cdbir.setDBInstanceClass(DBInstanceClass);
+			cdbir.setMultiAZ(MultiAZ);
+			cdbir.setAllocatedStorage(AllocatedStorage);
+			cdbir.setDBInstanceIdentifier(DBInstanceIdentifier);
+			cdbir.setMasterUsername(MasterUsername);
+			cdbir.setMasterUserPassword(MasterUserPassword);
+			cdbir.setDBName(DBName);
+			cdbir.setPort(Port);
+			cdbir.setBackupRetentionPeriod(BackupRetentionPeriod);
+			cdbir.setPubliclyAccessible(PubliclyAccessible);
+			cdbir.setDBParameterGroupName(DBParameterGroupName);
+			ArrayList<String> arrDbSecur = new ArrayList<String>();
+			arrDbSecur.add(DBSecurityGroupName);
+			cdbir.setDBSecurityGroups(arrDbSecur);
+			
+			log.Info("Creating RDS DB Instance");
+			// creating instance
+			DBInstance dbi=  rdsclient.createDBInstance(cdbir);
+			
+			// wait till instance created
+			boolean isWaiting = true;
+			while(isWaiting){
+				Thread.sleep(5000);
+				DescribeDBInstancesRequest request = new DescribeDBInstancesRequest();
+				request.setDBInstanceIdentifier(dbi.getDBInstanceIdentifier());
+				DescribeDBInstancesResult result = rdsclient.describeDBInstances(request);
+				List<DBInstance> d= result.getDBInstances();
+				Iterator<DBInstance> i = d.iterator();
+				
+				while(i.hasNext()){
+					DBInstance d1 = i.next();
+					log.Info("RDS Status : " + d1.getDBInstanceStatus());
+					if(d1.getDBInstanceStatus().equals("available")){
+						isWaiting = false;
+						log.Info("RDS Endpoint : " +	d1.getEndpoint().getAddress());
+					}
+				}
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+			System.exit(0);
+		}
+	}
+	
 
 }
