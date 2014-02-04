@@ -83,8 +83,8 @@ public class Main {
 	private Logger log = Logger.getInstance(Main.class);
 	
 	// require variable for every operation	
-	private String accessKey = "AKIAIIZRCPMJPQNA67CQ";
-	private String secretKey = "GQ/iCpIv1qJXrC4lhNS8/A9jb7HzkNpwym8q/UGk" ;
+	private String accessKey = "YOUR ACCESS KEY";
+	private String secretKey = "YOUR SECRET KEY" ;
 	private AWSCredentials credentials;
 	private String endPoint ;
 	private Region region ;
